@@ -1,0 +1,222 @@
+---
+title: "Prediction Assignment Writeup"
+author: "Srikanth"
+date: "12/10/2020"
+output: 
+  html_document: 
+    keep_md: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(cache = TRUE)
+```
+
+## I. Overview
+
+One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, goal is to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants.
+
+The goal of the project is to predict the manner in which they did the exercise. This is the "classe" variable in the training set. Any of the other variables to predict with. create a report describing how you built the model, how cross validation is done, the expected out of sample error, and what are the choices made in the execution. The prediction model is used to predict 20 different test cases.
+
+
+This report describes Data Preprocessing , Correlation Analysis, and some of models are investigated for final prediction.
+
+
+## II. Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, the goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website 
+
+http://web.archive.org/web/20161224072740/
+http:/groupware.les.inf.puc-rio.br/har
+(see the section on the Weight Lifting Exercise Dataset).
+
+## III. Data
+
+The training data for this project are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The data for this project come from this source: http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har.
+
+## IV. Exploratory Analysis
+
+
+## 1. Load libraries   
+
+```{r,message=FALSE}
+set.seed(123)
+library(caret)
+library(corrplot)
+library(rpart)
+library(rattle)
+```
+
+## 2. Download data
+
+```{r,message=FALSE}
+TrainFile="pml-training.csv"
+TestFile="pml-testing.csv"
+
+TrainUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+TestUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+if(!file.exists(TrainFile))
+{
+    download.file(TrainUrl,TrainFile)
+}
+if(!file.exists(TestFile))
+{
+    download.file(TestUrl,TestFile)
+}
+
+rawdata <- read.csv(TrainFile,na.strings = c("", "NA"))
+testset <- read.csv(TestFile, na.strings = c("", "NA"))
+```
+
+## 3. Data Preprocessing
+
+### a) Splitting the data
+
+```{r}
+# create a train set and validation set from rawdata
+rawindex  <- createDataPartition(rawdata$classe, p=0.7, list=FALSE)
+training <- rawdata[rawindex, ]
+validation  <- rawdata[-rawindex, ]
+dim(training)
+dim(validation)
+```
+
+### b) Cleaning the data
+
+```{r}
+# remove columns having Nearly Zero Veriance
+NZV <- nearZeroVar(training)
+training <- training[, -NZV]
+validation  <- validation[, -NZV]
+dim(training)
+dim(validation)
+```
+
+```{r}
+# remove variables that are mostly NA
+AllNA    <- sapply(training, function(x) mean(is.na(x))) > 0.95
+training <- training[, AllNA==FALSE]
+validation  <- validation[, AllNA==FALSE]
+dim(training)
+dim(validation)
+```
+
+```{r}
+# remove identification only variables (columns 1 to 5)
+training <- training[, -(1:5)]
+validation  <- validation[, -(1:5)]
+dim(training)
+dim(validation)
+```
+
+
+## 4. Correlation Analysis
+
+```{r}
+corMatrix <- cor(training[, -54])
+par(mar=c(1,1,1,1))
+corrplot(corMatrix, order = "hclust" , type = "lower",tl.cex = 0.6, tl.col = rgb(0, 0, 0))
+```
+
+
+## 5. Liner Discriminant Analysis
+
+```{r}
+model_lda <- train(classe ~ ., data = training, method = "lda")
+pred_lda <- predict(model_lda, validation)
+confmatLDA<-confusionMatrix(validation$classe, pred_lda)
+confmatLDA
+```
+
+```{r}
+# plot LDA results
+plot(confmatLDA$table, col = confmatLDA$byClass, 
+     main = paste("LDA - Accuracy =", round(confmatLDA$overall['Accuracy'], 4)))
+
+```
+
+## 6. Decision Tree
+
+```{r}
+model_dt <- rpart(classe ~ ., data = training, method = "class")
+fancyRpartPlot(model_dt)
+```
+
+```{r}
+pred_dt <- predict(model_dt, newdata = validation, type="class")
+confmatDT<-confusionMatrix(validation$classe,pred_dt)
+confmatDT
+```
+
+```{r}
+# plot DT results
+plot(confmatDT$table, col = confmatDT$byClass, 
+     main = paste("DT - Accuracy =", round(confmatDT$overall['Accuracy'], 4)))
+
+```
+
+## 7. Generalized Boosted Model (GBM)
+
+```{r}
+ctrl_gbm <- trainControl(method = "repeatedcv", number = 3, repeats = 1)
+model_gbm  <- train(classe ~ ., data = training, method = "gbm",
+                  trControl = ctrl_gbm, verbose = FALSE)
+pred_gbm<- predict(model_gbm, validation)
+confmatGBM<-confusionMatrix(validation$classe, pred_gbm)
+confmatGBM
+```
+
+```{r}
+# plot GBM results
+plot(confmatGBM$table, col = confmatGBM$byClass, 
+     main = paste("GBM - Accuracy =", round(confmatGBM$overall['Accuracy'], 4)))
+
+```
+
+## 8. Random Forest
+
+```{r}
+model_rf <- train(classe ~ ., data = training, method = "rf")
+pred_rf <- predict(model_rf, validation)
+confmatRF<-confusionMatrix(validation$classe, pred_rf)
+```
+
+```{r}
+# plot RF results
+plot(confmatRF$table, col = confmatRF$byClass, 
+     main = paste("RF - Accuracy =", round(confmatRF$overall['Accuracy'], 4)))
+```
+
+The predictive accuracy of the Random Forest model is maximum at 99.8 %.
+Hence Random Forest model is considered for test set
+
+## 9. Testing the model
+
+```{r}
+#Apply same set of trasformations applied to train set
+NZV <- nearZeroVar(testset)
+testing <- testset[, -NZV]
+testing <- testing[, colSums(is.na(testing)) == 0]
+testing <- testing[, -(1:5)]
+dim(testing)
+```
+
+
+```{r}
+test_rf <- predict(model_rf, testing)
+test_rf
+```
+
+## V. References
+
+Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. “Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human ’13)”. Stuttgart, Germany: ACM SIGCHI, 2013.
+
